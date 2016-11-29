@@ -1,0 +1,46 @@
+* Demonstration of CRLF to LF conversion
+
+This demo repository contains files with DOS (Windows) line endings
+(~CRLF~). This is the common case under Windows if the git
+configuration option ~core.autocrlf~ is set to the non-default value
+~false~.
+
+The goal is to convert the files in the entire history of the
+repository to normalized (Unix) line endings (~LF~). In order to allow
+for handling of special cases (such as domain specific binary file
+types) and to persist the options in the repository itself, the
+preferred approach is to use [[https://git-scm.com/docs/gitattributes][~.gitattributes~]] files in the repository
+tree.
+
+To check the line endings in the repository, you can display the
+contents of a file in the repository like this:
+: git cat-file blob :README-demo.txt | hexdump -C
+
+To view the previous revision, use this (see [[https://git-scm.com/docs/gitrevisions][gitrevisions(7)]]):
+: git cat-file blob @^:README-demo.txt | hexdump -C
+
+** Conversion
+
+The method below uses [[https://git-scm.com/docs/git-filter-branch][~git filter-branch~]] to rewrite the history and
+convert the files to Unix line endings. *Disclaimer:* Although this
+method seems to work, I'm not entirely sure if it's safe to do because
+I didn't find documentation that confirms the use of index operations
+inside /tree-filter/. See my question on [[http://stackoverflow.com/questions/40874563/git-filter-branch-and-gitattributes][stackoverflow]].
+
+Steps taken:
+- From a clean HEAD, delete all files and directories in the working
+  tree
+- Create a new commit containing the deletions
+- Run a /tree-filter/ adding a ~.gitattributes~ file and performing a
+  /reset/ for each commit
+- Lastly, undo the last commit which contains the deletions
+
+Commands to execute:
+
+#+BEGIN_EXAMPLE
+  git rm -r --ignore-unmatch .* *
+  git add -u
+  git commit -m "NUKE"
+  git filter-branch -f --tree-filter 'echo "* text=auto" > .gitattributes; git reset' HEAD
+  git reset --hard @^
+#+END_EXAMPLE
