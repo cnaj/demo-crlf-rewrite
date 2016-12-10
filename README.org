@@ -1,15 +1,14 @@
 * Demonstration of CRLF to LF conversion
 
 This demo repository contains files with DOS (Windows) line endings
-(~CRLF~). This is the common case under Windows if the git
-configuration option ~core.autocrlf~ is set to the non-default value
-~false~.
+(~CRLF~). This is the common case under Windows if the [[https://git-scm.com/docs/git-config][git-config(1)]]
+option ~core.autocrlf~ is set to the non-default value ~false~.
 
 The goal is to convert the files in the entire history of the
 repository to normalized (Unix) line endings (~LF~). In order to allow
 for handling of special cases (such as domain specific binary file
 types) and to persist the options in the repository itself, the
-preferred approach is to use [[https://git-scm.com/docs/gitattributes][~.gitattributes~]] files in the repository
+preferred approach is to use [[https://git-scm.com/docs/gitattributes][gitattributes(5)]] files in the repository
 tree.
 
 To check the line endings in the repository, you can display the
@@ -17,30 +16,84 @@ contents of a file in the repository like this:
 : git cat-file blob :README-demo.txt | hexdump -C
 
 To view the previous revision, use this (see [[https://git-scm.com/docs/gitrevisions][gitrevisions(7)]]):
-: git cat-file blob @^:README-demo.txt | hexdump -C
+: git cat-file blob @~1:README-demo.txt | hexdump -C
 
 ** Conversion
 
-The method below uses [[https://git-scm.com/docs/git-filter-branch][~git filter-branch~]] to rewrite the history and
-convert the files to Unix line endings. *Disclaimer:* Although this
-method seems to work, I'm not entirely sure if it's safe to do because
-I didn't find documentation that confirms the use of index operations
-inside /tree-filter/. See my question on [[http://stackoverflow.com/questions/40874563/git-filter-branch-and-gitattributes][stackoverflow]].
+The method below uses [[https://git-scm.com/docs/git-filter-branch][git-filter-branch(1)]] to rewrite the history and
+convert the files to Unix line endings using git's own /gitattributes/
+mechanism. For each revision in the repository's history, the
+following steps are executed:
 
-Steps taken:
-- From a clean HEAD, delete all files and directories in the working
-  tree
-- Create a new commit containing the deletions
-- Run a /tree-filter/ adding a ~.gitattributes~ file and performing a
-  /reset/ for each commit
-- Lastly, undo the last commit which contains the deletions
+- Create or copy a ~.gitattributes~ file into the work tree. Of course
+  you can use multiple files as described in [[https://git-scm.com/docs/gitattributes][gitattributes(5)]], but
+  keep in mind that the directory layout might have changed in the
+  course of the repository's history.
 
-Commands to execute:
+- Remove all recorded state from git's index so that every file in the
+  work tree is regarded as changed. This triggers the end-of-line
+  conversion when the index is updated at the end of each filter step.
 
-#+BEGIN_EXAMPLE
-  git rm -r --ignore-unmatch .* *
-  git add -u
-  git commit -m "NUKE"
-  git filter-branch -f --tree-filter 'echo "* text=auto" > .gitattributes; git reset' HEAD
-  git reset --hard @^
-#+END_EXAMPLE
+*** Commands to execute
+
+Enter the following on the /bash/ prompt or create a script file with
+these contents:
+
+#+BEGIN_SRC sh
+  filter='echo "* text=auto" > .gitattributes;
+  git rm -q --cached -rf --ignore-unmatch *'
+
+  git filter-branch --tree-filter $filter HEAD
+#+END_SRC
+
+*Notice:* If you have dotfiles (files starting with ~.~) in the top of
+your work tree that you need to be converted, you have to add them to
+the above /filter/ definition manually by adding
+~git rm -q --cached -f --ignore-unmatch .NAME-OF-DOTFILE;~ after the
+~echo~ line (the pattern ~.*~ will lead to an error). Dotfiles in
+subdirectories will be converted by the original /filter/ definition
+and don't have to be named explicitly.
+
+After the conversion, you can verify the integrity of the most current
+revision with this command (assuming you did the conversion on
+/master/ branch):
+: git diff --ignore-space-at-eol refs/original/refs/heads/master HEAD
+The only difference shown should be the ~.gitattributes~ file.
+
+This procedure was successfully executed on Ubuntu 14.04 LTS using git
+version 1.9.x.
+
+*** Caveats
+
+These caveats generally apply to /git filter-branch/.
+
+- Case sensitivity :: When rewriting the history of a project that was
+     developed using a case-insensitive file system (standard in
+     Windows or macOS), there might be case changing renames in the
+     project's history. This behavior was observed in a project
+     developed under Windows that was converted from SVN to git with
+     [[https://git-scm.com/docs/git-svn][git-svn(1)]]. To avoid corrupted revision contents, branch
+     filtering should be done using a case-sensitive file system
+     (e.g. Linux or macOS using a non-default file system).
+
+- File permissions :: When filtering branches while the [[https://git-scm.com/docs/git-config][git-config(1)]]
+     option ~core.filemode~ is ~false~ (default on Windows), the file
+     permissions (executable flag) are not preserved. You can see it
+     in the output of /git diff/.
+
+*** Technical details
+
+Looking at git's [[https://github.com/git/git/blob/v2.11.0/git-filter-branch.sh#L354-L369][sources]] (thanks to [[http://stackoverflow.com/a/40875387/4852374][torek]]), we see that /tree-filter/
+only updates the index for files that are recognized as new or as
+changed by /diff-index/. Since simply adding a ~.gitattributes~ file
+doesn't affect the other files, no rewriting of line endings will
+happen. This is why the index has to be reset so that any file that
+should be EOL processed is regarded as changed. By running
+~git rm --cached~ the files are picked by ~git diff-index HEAD~, as
+can be seen from its output.
+
+*** Previous method
+
+In an older version of this /README/ I proposed a different approach,
+which I mentioned in a related question on [[http://stackoverflow.com/questions/40874563/git-filter-branch-and-gitattributes][stackoverflow]]. The old
+version can be found [[https://github.com/cnaj/demo-crlf-rewrite/tree/so-question][here]].
